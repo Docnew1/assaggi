@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<title>Reproductor IPTV</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<style>
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; width: 100%; height: 100%; background: #000; color: #fff; font-family: Arial, sans-serif; overflow: hidden; }
+.app { width: 100vw; height: 100vh; display: flex; flex-direction: column; background: #000; }
+.player-section { height: 42vh; min-height: 220px; background: #000; border-bottom: 1px solid rgba(255,255,255,0.08); display: flex; flex-direction: column; min-width: 0; flex: 0 0 auto; position: relative; }
+.topbar { flex: 0 0 78px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px; background: #000; border-bottom: 1px solid rgba(255,255,255,0.05); transition: opacity 0.3s ease; }
+.player-title { flex: 1; min-width: 0; padding: 8px 10px; border-radius: 12px; background: rgba(0,0,0,0.55); backdrop-filter: blur(4px); font-size: 14px; font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.video-wrap { flex: 1; min-height: 0; background: #000; position: relative; }
+
+/* Stile speciale per il bottone in modalità Full Screen (fluttuante e con dissolvenza) */
+.doc-btn { border: 3px solid #00ff66; border-radius: 22px; padding: 10px 20px; cursor: pointer; white-space: nowrap; background: #28a745; box-shadow: 0 0 12px rgba(40, 167, 69, 0.3), inset 0 0 18px rgba(255,255,255,0.1), inset 0 0 30px rgba(0,0,0,0.2); transition: transform 0.18s ease, filter 0.18s ease, box-shadow 0.18s ease, opacity 0.5s ease; z-index: 99; }
+.doc-btn strong { display: inline-block; color: #000000; font-size: 14px; font-weight: 900; letter-spacing: 0.4px; }
+.doc-btn:hover, .doc-btn:active { transform: scale(1.03); filter: brightness(1.08); background: #218838; box-shadow: 0 0 16px rgba(40, 167, 69, 0.5), inset 0 0 18px rgba(255,255,255,0.2), inset 0 0 30px rgba(0,0,0,0.3); }
+
+/* Quando siamo in Full Screen, nascondiamo la topbar standard e posizioniamo il bottone in alto a destra sopra il video */
+:fullscreen .topbar { display: none !important; }
+:-webkit-full-screen .topbar { display: none !important; }
+:-moz-full-screen .topbar { display: none !important; }
+:-ms-fullscreen .topbar { display: none !important; }
+
+:fullscreen .doc-btn, :-webkit-full-screen .doc-btn, :-moz-full-screen .doc-btn { position: absolute; top: 15px; right: 15px; }
+
+/* Classe per nascondere il bottone con dissolvenza */
+.doc-btn.fade-out { opacity: 0; pointer-events: none; }
+
+video { width: 100%; height: 100%; display: block; background: #000; object-fit: contain; }
+.list-section { flex: 1; min-height: 0; display: flex; flex-direction: column; background: #0b0b0b; min-width: 0; }
+.list-header { padding: 12px; border-bottom: 1px solid rgba(255,255,255,0.08); background: #111; font-size: 14px; font-weight: bold; flex: 0 0 auto; }
+.table-wrap { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+table { width: 100%; border-collapse: collapse; }
+tr { border-bottom: 1px solid rgba(255,255,255,0.06); cursor: pointer; }
+tr:hover { background: rgba(255,255,255,0.05); }
+tr.active { background: rgba(0, 207, 255, 0.14); }
+tr.separator { background: #1a1a1a; cursor: default; opacity: 0.9; font-weight: bold; text-align: center; }
+tr.separator:hover { background: #1a1a1a; }
+td { padding: 10px 8px; vertical-align: middle; font-size: 14px; }
+.col-logo { width: 58px; text-align: center; }
+.logo { width: 42px; height: 42px; object-fit: contain; border-radius: 8px; background: #1a1a1a; display: inline-block; }
+.name-box { display: flex; flex-direction: column; gap: 3px; }
+.channel-name { font-weight: bold; line-height: 1.2; }
+.channel-sub { font-size: 12px; opacity: 0.75; }
+.play-badge { display: inline-block; min-width: 64px; text-align: center; padding: 6px 10px; border-radius: 999px; background: #2ecc71; color: #000; font-size: 12px; font-weight: bold; }
+/* ===== Mode PC / TV ===== */
+body.desktop-tv-mode .app { flex-direction: row-reverse; align-items: flex-start; }
+body.desktop-tv-mode .player-section { width: 70vw; height: 46vh; min-height: 320px; max-height: 520px; border-bottom: 0; border-left: 1px solid rgba(255,255,255,0.08); align-self: flex-start; }
+body.desktop-tv-mode .list-section { width: 30vw; height: 100vh; flex: 0 0 auto; }
+@media (max-width: 899px) { body:not(.desktop-tv-mode) .app { flex-direction: column; } }
+</style>
+<script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+</head>
+<body>
+<div class="app">
+  <div class="player-section" id="wrap">
+    <div class="topbar">
+      <div class="player-title" id="playerTitle">Seleziona un canale</div>
+      <button id="docBtn" class="doc-btn" type="button">
+        <strong>Doc TV Full Screen</strong>
+      </button>
+    </div>
+    <div class="video-wrap">
+      <video id="video" controls autoplay playsinline webkit-playsinline x5-playsinline preload="auto"></video>
+      <!-- Bottone duplicato per il full screen (posizionato sopra il video quando attivo) -->
+    </div>
+  </div>
+  <div class="list-section">
+    <div class="list-header">Don ita multi channel: Sport</div>
+    <div class="table-wrap">
+      <table>
+        <tbody id="channelsBody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+<script>
+const channels = [
+  {"name": "Sky uno", "logo": "https://raw.githubusercontent.com/tv-logo/tv-logos/main/countries/italy/sky-uno-it.png", "url": "http://hdlocal.de:8080/live/iptv.kosiptv.comNEW/gJUP3KsM2ENEW/2812.m3u8"},
+  {"name": "Sky Atlantic", "logo": "https://raw.githubusercontent.com/tv-logo/tv-logos/main/countries/italy/sky-atlantic-it.png", "url": "http://hdlocal.de:8080/live/iptv.kosiptv.comNEW/gJUP3KsM2ENEW/2861.m3u8"},
+  {"name": "Sky Sport 24", "logo": "https://raw.githubusercontent.com/tv-logo/tv-logos/main/countries/italy/sky-sport-24-it.png", "url": "http://hdlocal.de:8080/live/iptv.kosiptv.comNEW/gJUP3KsM2ENEW/3903.m3u8"},
+  {"name": "Sky Sport 24 link 1", "logo": "https://raw.githubusercontent.com/tv-logo/tv-logos/main/countries/italy/sky-sport-24-it.png", "url": "http://hdlocal.de:8080/live/iptv.kosiptv.comNEW/gJUP3KsM2ENEW/265011480.m3u8"},
+  {"name": "Sky Sport 24 link 2", "logo": "https://raw.githubusercontent.com/tv-logo/tv-logos/main/countries/italy/sky-sport-24-it.png", "url": "http://hdlocal.de:8080/live/iptv.kosiptv.comNEW/gJUP3KsM2ENEW/3110.m3u8"},
+  {"name": "Sky Sport uno", "logo": "https://raw.githubusercontent.com/tv-logo/tv-logos/main/countries/italy/sky-sport-uno-it.png", "url": "http://hdlocal.de:8080/live/iptv.kosiptv.comNEW/gJUP3KsM2ENEW/265011484.m3u8"},
+  {"name": "Sky sport calcio link 1", "logo": "https://raw.githubusercontent.com/tv-logo/tv-logos/main/countries/italy/sky-sport-calcio-it.png", "url": "http://hdlocal.de:8080/live/iptv.kosiptv.comNEW/gJUP3KsM2ENEW/6733.m3u8"},
+  {"name": "Sky sport calcio link 2", "logo": "https://raw.githubusercontent.com/tv-logo/tv-logos/main/countries/italy/sky-sport-calcio-it.png", "url": "http://hdlocal.de:8080/live/iptv.kosiptv.comNEW/gJUP3KsM2ENEW/6733.m3u8"},
+  {"name": "RSLa2", "logo": "https://raw.githubusercontent.com/tv-logo/tv-logos/main/countries/switzerland/rsi-la2-ch.png", "url": "http://hdlocal.de:8080/live/iptv.kosiptv.comNEW/gJUP3KsM2ENEW/2905.m3u8.m3u8"},
+  {"name": "Sky moto GP", "logo": "https://raw.githubusercontent.com/tv-logo/tv-logos/main/countries/italy/sky-sport-motogp-it.png", "url": "http://hdlocal.de:8080/live/iptv.kosiptv.comNEW/gJUP3KsM2ENEW/3907.m3u8"},
+  {"name": "Dazn", "logo": "https://raw.githubusercontent.com/tv-logo/tv-logos/main/countries/italy/dazn-channel-it.png", "url": "http://hdlocal.de:8080/live/iptv.kosiptv.comNEW/gJUP3KsM2ENEW/265011503.m3u8"},
+  {"name": "Dazn", "logo": "https://raw.githubusercontent.com/tv-logo/tv-logos/main/countries/italy/dazn-channel-it.png", "url": "http://hdlocal.de:8080/live/iptv.kosiptv.comNEW/gJUP3KsM2ENEW/265011504.m3u8"},
+  {"name": "Dazn", "logo": "https://raw.githubusercontent.com/tv-logo/tv-logos/main/countries/italy/dazn-channel-it.png", "url": "http://hdlocal.de:8080/live/iptv.kosiptv.comNEW/gJUP3KsM2ENEW/665042807.m3u8"},
+  {"name": "Dazn", "logo": "https://raw.githubusercontent.com/tv-logo/tv-logos/main/countries/italy/dazn-channel-it.png", "url": "http://hdlocal.de:8080/live/iptv.kosiptv.comNEW/gJUP3KsM2ENEW/665042809.m3u8"},
+  {"name": "Dazn", "logo": "https://raw.githubusercontent.com/tv-logo/tv-logos/main/countries/italy/dazn-channel-it.png", "url": "http://hdlocal.de:8080/live/iptv.kosiptv.comNEW/gJUP3KsM2ENEW/665042810.m3u8"},
+  {"name": "Dazn", "logo": "https://raw.githubusercontent.com/tv-logo/tv-logos/main/countries/italy/dazn-channel-it.png", "url": "http://hdlocal.de:8080/live/iptv.kosiptv.comNEW/gJUP3KsM2ENEW/665042811.m3u8"},
+  {"name": "Dazn", "logo": "https://raw.githubusercontent.com/tv-logo/tv-logos/main/countries/italy/dazn-channel-it.png", "url": "http://hdlocal.de:8080/live/iptv.kosiptv.comNEW/gJUP3KsM2ENEW/665042812.m3u8"},
+  {"name": "Dazn", "logo": "https://raw.githubusercontent.com/tv-logo/tv-logos/main/countries/italy/dazn-channel-it.png", "url": "http://hdlocal.de:8080/live/iptv.kosiptv.comNEW/gJUP3KsM2ENEW/665042813.m3u8"},
+  {"name": "Dazn", "logo": "https://raw.githubusercontent.com/tv-logo/tv-logos/main/countries/italy/dazn-channel-it.png", "url": "http://hdlocal.de:8080/live/iptv.kosiptv.comNEW/gJUP3KsM2ENEW/665042814.m3u8"},
+  {"name": "Dazn", "logo": "https://raw.githubusercontent.com/tv-logo/tv-logos/main/countries/italy/dazn-channel-it.png", "url": "http://hdlocal.de:8080/live/iptv.kosiptv.comNEW/gJUP3KsM2ENEW/665042815.m3u8"},
+  {"name": "Dazn", "logo": "https://raw.githubusercontent.com/tv-logo/tv-logos/main/countries/italy/dazn-channel-it.png", "url": "http://hdlocal.de:8080/live/iptv.kosiptv.comNEW/gJUP3KsM2ENEW/665042808.m3u8"},
+  {"name": "Eurosport1 1", "logo": "https://raw.githubusercontent.com/tv-logo/tv-logos/main/countries/france/eurosport-1-fr.png", "url": "http://hdlocal.de:8080/live/iptv.kosiptv.comNEW/gJUP3KsM2ENEW/665042816.m3u8"},
+  {"name": "Eurosport1 2", "logo": "https://raw.githubusercontent.com/tv-logo/tv-logos/main/countries/france/eurosport-2-fr.png", "url": "http://hdlocal.de:8080/live/iptv.kosiptv.comNEW/gJUP3KsM2ENEW/265011416.m3u8"},
+  {"name": "Sky crime", "logo": "https://raw.githubusercontent.com/tv-logo/tv-logos/main/countries/italy/sky-crime-it.png", "url": "http://hdlocal.de:8080/live/iptv.kosiptv.comNEW/gJUP3KsM2ENEW/265011420.m3u8"},
+  {"name": "Sky cri e investigation", "logo": "https://raw.githubusercontent.com/tv-logo/tv-logos/main/countries/italy/crime-and-investigation-it.png", "url": "http://hdlocal.de:8080/live/iptv.kosiptv.comNEW/gJUP3KsM2ENEW/3918.m3u8"},
+  {"name": "Sky Arte", "logo": "https://raw.githubusercontent.com/tv-logo/tv-logos/main/countries/italy/sky-arte-it.png", "url": "http://hdlocal.de:8080/live/iptv.kosiptv.comNEW/gJUP3KsM2ENEW/2806.m3u8"},
+  {"name": "Sky Cinema uno", "logo": "https://raw.githubusercontent.com/tv-logo/tv-logos/main/countries/italy/sky-cinema-uno-hz-it.png", "url": "http://hdlocal.de:8080/live/iptv.kosiptv.comNEW/gJUP3KsM2ENEW/2808.m3u8"},
+  {"name": "Sky cinema suspence", "logo": "https://raw.githubusercontent.com/tv-logo/tv-logos/main/countries/italy/sky-cinema-suspense-hz-it.png", "url": "http://hdlocal.de:8080/live/iptv.kosiptv.comNEW/gJUP3KsM2ENEW/2870.m3u8"},
+  {"name": "Sky cinema action", "logo": "https://raw.githubusercontent.com/tv-logo/tv-logos/main/countries/italy/sky-cinema-action-hz-it.png", "url": "http://hdlocal.de:8080/live/iptv.kosiptv.comNEW/gJUP3KsM2ENEW/2874.m3u8"},
+  {"name": "Cinema comedy", "logo": "https://raw.githubusercontent.com/tv-logo/tv-logos/main/countries/italy/sky-cinema-comedy-hz-it.png", "url": "http://hdlocal.de:8080/live/iptv.kosiptv.comNEW/gJUP3KsM2ENEW/265011458.m3u8"},
+  {"name": "Cinema drama", "logo": "https://raw.githubusercontent.com/tv-logo/tv-logos/main/countries/italy/sky-cinema-drama-hz-it.png", "url": "http://w1ta1yqf50.giozn.com:80/live/aMkdQ7Qxg2/9P9KURcYXv/148108.m3u8"}
+];
+
+let video = document.getElementById('video');
+const channelsBody = document.getElementById('channelsBody');
+const playerTitle = document.getElementById('playerTitle');
+const docBtn = document.getElementById('docBtn');
+const playerSection = document.getElementById('wrap');
+let hls = null;
+let activeIndex = -1;
+let fadeTimer = null;
+
+function applyLayoutMode() {
+  const w = window.innerWidth || document.documentElement.clientWidth || screen.width || 0;
+  const h = window.innerHeight || document.documentElement.clientHeight || screen.height || 0;
+  const desktopTvMode = w >= 900 || (w >= 760 && w > h);
+  document.body.classList.toggle("desktop-tv-mode", desktopTvMode);
+}
+
+function destroyHls() {
+  if (hls) {
+    try { hls.destroy(); } catch (e) {}
+    hls = null;
+  }
+}
+
+function loadChannel(index) {
+  if (index < 0 || index >= channels.length) return;
+  const ch = channels[index];
+
+  activeIndex = index;
+  playerTitle.textContent = ch.name;
+  highlightActiveRow();
+  
+  try { video.pause(); } catch(e) {}
+  destroyHls();
+  
+  video.removeAttribute('src');
+  video.load();
+
+  if (Hls.isSupported()) {
+    hls = new Hls({
+      enableWorker: true,
+      lowLatencyMode: true,
+      fragLoadingTimeOut: 10000,
+      manifestLoadingTimeOut: 10000
+    });
+    hls.loadSource(ch.url);
+    hls.attachMedia(video);
+    
+    hls.on(Hls.Events.MANIFEST_PARSED, function() {
+      video.play().catch(function() {});
+    });
+    
+    hls.on(Hls.Events.ERROR, function(event, data) {
+      if (data.fatal) {
+        playerTitle.textContent = ch.name + " (Non disponibile)";
+        destroyHls();
+      }
+    });
+  } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+    video.src = ch.url;
+    video.addEventListener('loadedmetadata', function() {
+      video.play().catch(function() {});
+    }, { once: true });
+    video.addEventListener('error', function() {
+      playerTitle.textContent = ch.name + " (Non disponibile)";
+    }, { once: true });
+  }
+}
+
+function highlightActiveRow() {
+  const rows = document.querySelectorAll('tr[data-index]');
+  rows.forEach(function(row) {
+    const idx = parseInt(row.getAttribute('data-index'), 10);
+    const isActive = (idx === activeIndex);
+    row.classList.toggle('active', isActive);
+    
+    if (isActive) {
+      row.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+  });
+}
+
+function renderChannels() {
+  channelsBody.innerHTML = '';
+
+  const sepTr = document.createElement('tr');
+  sepTr.className = 'separator';
+  const sepTd = document.createElement('td');
+  sepTd.colSpan = 3;
+  sepTd.textContent = '----- DOC ITALIA TV-----';
+  sepTr.appendChild(sepTd);
+  channelsBody.appendChild(sepTr);
+
+  channels.forEach(function(ch, index) {
+    const tr = document.createElement('tr');
+    tr.setAttribute('data-index', index);
+
+    const tdLogo = document.createElement('td');
+    tdLogo.className = 'col-logo';
+    const img = document.createElement('img');
+    img.className = 'logo';
+    img.alt = ch.name || '';
+    img.src = ch.logo || '';
+    img.onerror = function() { this.style.visibility = 'hidden'; };
+    tdLogo.appendChild(img);
+
+    const tdInfo = document.createElement('td');
+    const nameBox = document.createElement('div');
+    nameBox.className = 'name-box';
+    const nameDiv = document.createElement('div');
+    nameDiv.className = 'channel-name';
+    nameDiv.textContent = ch.name;
+    const subDiv = document.createElement('div');
+    subDiv.className = 'channel-sub';
+    subDiv.textContent = 'Tocca per riprodurre';
+    nameBox.appendChild(nameDiv);
+    nameBox.appendChild(subDiv);
+    tdInfo.appendChild(nameBox);
+
+    const tdAction = document.createElement('td');
+    tdAction.style.width = '80px';
+    tdAction.style.textAlign = 'right';
+    const badge = document.createElement('span');
+    badge.className = 'play-badge';
+    badge.textContent = 'Guarda';
+    tdAction.appendChild(badge);
+
+    tr.appendChild(tdLogo);
+    tr.appendChild(tdInfo);
+    tr.appendChild(tdAction);
+
+    tr.addEventListener('click', function() {
+      loadChannel(index);
+    });
+
+    channelsBody.appendChild(tr);
+  });
+}
+
+// Gestione della dissolvenza automatica del bottone in Full Screen
+function resetFadeTimer() {
+  if (!document.fullscreenElement && !document.webkitFullscreenElement) return;
+  docBtn.classList.remove('fade-out');
+  clearTimeout(fadeTimer);
+  fadeTimer = setTimeout(function() {
+    if (document.fullscreenElement || document.webkitFullscreenElement) {
+      docBtn.classList.add('fade-out');
+    }
+  }, 3000); // Sfuma dopo 3 secondi
+}
+
+// Mostra il bottone se muovi il mouse o tocchi lo schermo in Full Screen
+playerSection.addEventListener('mousemove', resetFadeTimer);
+playerSection.addEventListener('touchstart', resetFadeTimer);
+
+// Attivazione / Disattivazione Full Screen al click sul bottone
+docBtn.addEventListener('click', function() {
+  const elem = playerSection;
+  if (!document.fullscreenElement && !document.webkitFullscreenElement) {
+    if (elem.requestFullscreen) {
+      elem.requestFullscreen();
+    } else if (elem.webkitRequestFullscreen) {
+      elem.webkitRequestFullscreen();
+    } else if (video.requestFullscreen) {
+      video.requestFullscreen();
+    }
+    resetFadeTimer();
+  } else {
+    clearTimeout(fadeTimer);
+    docBtn.classList.remove('fade-out');
+    if (document.exitFullscreen) {
+      document.exitFullscreen();
+    } else if (document.webkitExitFullscreen) {
+      document.webkitExitFullscreen();
+    }
+  }
+});
+
+// Ripristina il bottone quando si esce dal full screen
+document.addEventListener('fullscreenchange', function() {
+  if (!document.fullscreenElement) {
+    clearTimeout(fadeTimer);
+    docBtn.classList.remove('fade-out');
+  }
+});
+document.addEventListener('webkitfullscreenchange', function() {
+  if (!document.webkitFullscreenElement) {
+    clearTimeout(fadeTimer);
+    docBtn.classList.remove('fade-out');
+  }
+});
+
+applyLayoutMode();
+window.addEventListener('resize', applyLayoutMode);
+window.addEventListener('orientationchange', applyLayoutMode);
+renderChannels();
+
+if (channels.length > 0) {
+  loadChannel(0);
+}
+</script>
+</body>
+</html>
